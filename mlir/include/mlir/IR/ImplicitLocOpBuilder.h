@@ -107,6 +107,68 @@ private:
   Location curLoc;
 };
 
+/// When using the conversion framework, we need to use a reference to the old
+/// builder because of its internal state. Despite that it behaves almost the
+/// same as ImplicitLocOpBuilder.
+struct BuilderReferenceWithLoc {
+  // Constructor for analysis (no code generation, get builder disabled).
+  BuilderReferenceWithLoc(mlir::Location loc)
+      : builder(nullptr), location(loc) {}
+  // Constructors for code generation.
+  BuilderReferenceWithLoc(mlir::OpBuilder &b, mlir::Location loc)
+      : builder(&b), location(loc) {}
+  BuilderReferenceWithLoc(const BuilderReferenceWithLoc &db) = default;
+  virtual ~BuilderReferenceWithLoc() = default;
+  BuilderReferenceWithLoc(BuilderReferenceWithLoc &&) = delete;
+  BuilderReferenceWithLoc &operator=(const BuilderReferenceWithLoc &) = delete;
+  BuilderReferenceWithLoc &&
+  operator=(const BuilderReferenceWithLoc &&) = delete;
+
+  // Public getters of builder and location.
+  mlir::OpBuilder &getBuilder() const { return b(); }
+  mlir::OpBuilder *getBuilderPtr() const { return builder; } // Possibly null.
+  mlir::Location getLoc() const { return loc(); }
+  void setLoc(mlir::Location loc) { location = loc; }
+
+  // Create ops without the need to pass a location.
+  template <typename OpTy, typename... Args>
+  OpTy create(Args... args) {
+    return b().template create<OpTy>(loc(), std::forward<Args>(args)...);
+  }
+
+  template <typename OpTy, typename... Args>
+  void createOrFold(llvm::SmallVectorImpl<mlir::Value> &results,
+                    Args &&...args) {
+    b().createOrFold<OpTy>(results, loc(), std::forward<Args>(args)...);
+  }
+
+  template <typename OpTy, typename... Args>
+  std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::OneResult>(),
+                   mlir::Value>
+  createOrFold(Args &&...args) {
+    b().createOrFold<OpTy>(loc(), std::forward<Args>(args)...);
+  }
+
+  template <typename OpTy, typename... Args>
+  std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::ZeroResults>(),
+                   mlir::Value>
+  createOrFold(Args &&...args) {
+    b().createOrFold<OpTy>(loc(), std::forward<Args>(args)...);
+  }
+
+protected:
+  // Private getters of builder and location (concise version).
+  mlir::OpBuilder &b() const {
+    assert(builder);
+    return *builder;
+  }
+  mlir::Location loc() const { return location; }
+
+private:
+  mlir::OpBuilder *builder;
+  mlir::Location location;
+};
+
 } // namespace mlir
 
 #endif // MLIR_IR_IMPLICITLOCOPBUILDER_H
